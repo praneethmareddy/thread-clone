@@ -6,7 +6,7 @@ const generateTokenAndSetCookie = (userId, res) => {
 	});
 
 	res.cookie("jwt", token, {
-		httpOnly: true, // more secure
+		// httpOnly: true, // more secure
 		
 		sameSite: "strict", // CSRF
 	});
