@@ -38,11 +38,7 @@ const Header = () => {
 		        </Flex>
 				
 			)}
-			{!user && (
-				<Link as={RouterLink} to={"/auth"} onClick={() => setAuthScreen("login")}>
-					Login
-				</Link>
-			)}
+			
 
 			<Image
 				cursor={"pointer"}
@@ -69,6 +65,11 @@ const Header = () => {
 						<FiLogOut size={20} />
 					</Button>
 				</Flex>
+			)}
+			{!user && (
+				<Link as={RouterLink} to={"/auth"} onClick={() => setAuthScreen("login")}>
+					Login
+				</Link>
 			)}
 
 			
