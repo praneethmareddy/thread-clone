@@ -20,6 +20,12 @@ const Header = () => {
 
 	return (
 		<Flex justifyContent={"space-between"} mt={6} mb='12'>
+			{!user && (
+				<Link as={RouterLink} to={"/auth"} onClick={() => setAuthScreen("signup")}>
+					Sign up
+				</Link>
+			)}
+			
 			{user && 
 			(
 				<Flex alignItems={"center"} gap={4}>
@@ -65,11 +71,7 @@ const Header = () => {
 				</Flex>
 			)}
 
-			{!user && (
-				<Link as={RouterLink} to={"/auth"} onClick={() => setAuthScreen("signup")}>
-					Sign up
-				</Link>
-			)}
+			
 		</Flex>
 	);
 };
