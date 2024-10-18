@@ -3,41 +3,56 @@ import User from "../models/userModel.js";
 import { v2 as cloudinary } from "cloudinary";
 
 const createPost = async (req, res) => {
-	try {
-		const { postedBy, text } = req.body;
-		let { img } = req.body;
+    try {
+        const { postedBy, text } = req.body;
+        let { img } = req.body;
 
-		if (!postedBy || !text) {
-			return res.status(400).json({ error: "Postedby and text fields are required" });
-		}
+        if (!postedBy || !text) {
+            return res.status(400).json({ error: "Postedby and text fields are required" });
+        }
 
-		const user = await User.findById(postedBy);
-		if (!user) {
-			return res.status(404).json({ error: "User not found" });
-		}
+        const user = await User.findById(postedBy);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
 
-		if (user._id.toString() !== req.user._id.toString()) {
-			return res.status(401).json({ error: "Unauthorized to create post" });
-		}
+        if (user._id.toString() !== req.user._id.toString()) {
+            return res.status(401).json({ error: "Unauthorized to create post" });
+        }
 
-		const maxLength = 500;
-		if (text.length > maxLength) {
-			return res.status(400).json({ error: `Text must be less than ${maxLength} characters` });
-		}
+        const maxLength = 500;
+        if (text.length > maxLength) {
+            return res.status(400).json({ error: `Text must be less than ${maxLength} characters` });
+        }
 
-		if (img) {
-			const uploadedResponse = await cloudinary.uploader.upload(img);
-			img = uploadedResponse.secure_url;
-		}
+        if (img) {
+            const uploadedResponse = await cloudinary.uploader.upload(img);
+            img = uploadedResponse.secure_url;
+        }
 
-		const newPost = new Post({ postedBy, text, img });
-		await newPost.save();
+        // Create new post
+        const newPost = new Post({ postedBy, text, img });
+        await newPost.save();
 
-		res.status(201).json(newPost);
-	} catch (err) {
-		res.status(500).json({ error: err.message });
-		console.log(err);
-	}
+        // After saving the post, update the external model
+        const updateModelResponse = await fetch('https://ml-api-dwdv.onrender.com/update_model', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text,
+                posted_by: postedBy.toString()
+            })
+        });
+
+        if (!updateModelResponse.ok) {
+            throw new Error('Failed to update the model');
+        }
+
+        res.status(201).json(newPost);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+        console.log(err);
+    }
 };
 const repost = async (req, res) => {
 	try {
@@ -169,23 +184,82 @@ const replyToPost = async (req, res) => {
 	}
 };
 
+
 const getFeedPosts = async (req, res) => {
-	try {
-		const userId = req.user._id;
-		const user = await User.findById(userId);
-		if (!user) {
-			return res.status(404).json({ error: "User not found" });
-		}
+    try {
+        const userId = req.user._id; // Get the current user's ID
+        const user = await User.findById(userId).select('following'); // Only select the following field
 
-		const following = user.following;
+        // Check if the user exists
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
 
-		const feedPosts = await Post.find({ postedBy: { $in: following } }).sort({ createdAt: -1 });
+        const following = user.following; // Get the list of users the current user is following
 
-		res.status(200).json(feedPosts);
-	} catch (err) {
-		res.status(500).json({ error: err.message });
-	}
+        // Fetch feed posts from the users the current user is following
+        const feedPostsPromise = Post.find({ postedBy: { $in: following } })
+            .sort({ createdAt: -1 })
+            .limit(20) // Limit the number of feed posts for efficiency
+            .select('_id postedBy text img createdAt likes replies'); // Project only necessary fields
+
+        // Fetch recommended posts using the external API
+        const recommendationPromise = fetch('https://ml-api-dwdv.onrender.com/recommend_posts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_id: userId.toString(),
+                top_n: 5
+            })
+        }).then(response => {
+            if (!response.ok) throw new Error('Failed to fetch recommended posts');
+            return response.json();
+        });
+
+        // Wait for both promises to resolve
+        const [feedPosts, recommendationData] = await Promise.all([feedPostsPromise, recommendationPromise]);
+
+        // Format recommended posts to match the feed post structure
+        const recommendedPosts = (Array.isArray(recommendationData.recommendations) ? recommendationData.recommendations : []).map(rec => ({
+            _id: rec.postId || null,            
+            postedBy: rec.userId || null,       
+            text: rec.text || '',               
+            img: null,                          
+            createdAt: new Date(),              
+            likes: [],                          
+            replies: []                         
+        })).filter(post => post._id && post.postedBy); // Filter out any posts with null _id or postedBy
+
+        // Combine feed posts and recommended posts
+        const combinedPosts = [...feedPosts, ...recommendedPosts];
+
+        // Use a Set to ensure uniqueness of posts based on postId
+        const uniquePostIds = new Set();
+        const uniquePosts = combinedPosts.filter(post => {
+            if (post._id && !uniquePostIds.has(post._id)) {
+                uniquePostIds.add(post._id);
+                return true; // Include this post
+            }
+            return false; // Exclude this post
+        });
+
+        // Sort the unique posts based on creation time (most recent first)
+        uniquePosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        // Send combined posts as the response
+        res.status(200).json(uniquePosts);
+    } catch (err) {
+        res.status(500).json({ error: 'Internal Server Error', message: err.message });
+        console.error(err);
+    }
 };
+
+
+
+
+
+
+
 
 const getUserPosts = async (req, res) => {
 	const { username } = req.params;

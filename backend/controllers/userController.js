@@ -4,6 +4,143 @@ import bcrypt from "bcryptjs";
 import generateTokenAndSetCookie from "../utils/helpers/generateTokenAndSetCookie.js";
 import { v2 as cloudinary } from "cloudinary";
 import mongoose from "mongoose";
+import crypto from 'crypto'; // To generate a random token
+
+import nodemailer from 'nodemailer'; // For sending emails
+
+
+const signupUser = async (req, res) => {
+	try {
+		const { name, email, username, password } = req.body;
+		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+		if (!emailRegex.test(email)) {
+			return res.status(400).json({ error: "Invalid email format" });
+		}
+
+		const user = await User.findOne({ $or: [{ email }, { username }] });
+
+		if (user && user.isVerified) {
+			return res.status(400).json({ error: "User already exists" });
+		}
+
+		const salt = await bcrypt.genSalt(10);
+		const hashedPassword = await bcrypt.hash(password, salt);
+
+		// Create a verification token
+		const verificationToken = crypto.randomBytes(32).toString('hex');
+
+		const newUser = new User({
+			name,
+			email,
+			username,
+			password: hashedPassword,
+			verificationToken,
+			isVerified: false // Set isVerified to false initially
+		});
+		await newUser.save();
+
+		if (newUser) {
+			// Send verification email
+			const verificationLink = `${req.protocol}://${req.get('host')}/verify-email/${verificationToken}/${email}`;
+
+			await sendVerificationEmail(email, verificationLink);
+
+			res.status(201).json({
+				message: "Signup successful! Please check your email for verification.",
+				_id: newUser._id,
+				name: newUser.name,
+				email: newUser.email,
+				username: newUser.username,
+				bio: newUser.bio,
+				profilePic: newUser.profilePic,
+				isVerified: newUser.isVerified
+			});
+		} else {
+			res.status(400).json({ error: "Invalid user data" });
+		}
+	} catch (err) {
+		res.status(500).json({ error: err.message });
+		console.log("Error in signupUser: ", err.message);
+	}
+};
+
+// Function to send the verification email
+const sendVerificationEmail = async (email, verificationLink) => {
+    try {
+         // Encode the link
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASSWORD
+            }
+        });
+
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: email,
+            subject: 'Email Verification',
+            html: `<p> Please verify your email by clicking the link below:</p>
+                   <a href="${verificationLink}">Verify Email</a>` // Use encoded link
+				   
+        };
+
+        await transporter.sendMail(mailOptions);
+        console.log('Verification email sent to:', email);
+    } catch (error) {
+        console.error('Error sending email:', error);
+        throw new Error('Error sending verification email');
+    }
+};
+
+const verifyEmail = async (req, res) => {
+    try {
+        const { token, email } = req.params;
+        
+        // Log token and email for debugging
+        console.log("Token:", token);
+        console.log("Email:", email);
+
+        // Check if token and email exist
+        if (!token || !email) {
+            return res.status(400).json({ error: "Missing token or email" });
+        }
+
+        // Find the user with the corresponding email and token
+        const user = await User.findOne({ email, verificationToken: token });
+
+        if (!user) {
+            return res.status(400).json({ error: "Invalid or expired token" });
+        }
+
+        // Mark the user as verified
+        user.isVerified = true;
+        user.verificationToken = null; // Clear the token after verification
+        await user.save();
+
+        // Send back a success message and any required data (e.g., token)
+		generateTokenAndSetCookie(user._id, res);
+
+		res.status(201).json({
+			_id: user._id,
+			name: user.name,
+			email: user.email,
+			username: user.username,
+			bio: user.bio,
+			profilePic: user.profilePic,
+		});
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+        console.log("Error in verifyEmail: ", err.message);
+    }
+};
+
+
+
+
+
+// Function to send the verification email
 
 const getUserProfile = async (req, res) => {
 	// We will fetch user profile either with username or userId
@@ -30,73 +167,63 @@ const getUserProfile = async (req, res) => {
 	}
 };
 
-const signupUser = async (req, res) => {
-	try {
-		const { name, email, username, password } = req.body;
-		const user = await User.findOne({ $or: [{ email }, { username }] });
 
-		if (user) {
-			return res.status(400).json({ error: "User already exists" });
-		}
-		const salt = await bcrypt.genSalt(10);
-		const hashedPassword = await bcrypt.hash(password, salt);
-
-		const newUser = new User({
-			name,
-			email,
-			username,
-			password: hashedPassword,
-		});
-		await newUser.save();
-
-		if (newUser) {
-			generateTokenAndSetCookie(newUser._id, res);
-
-			res.status(201).json({
-				_id: newUser._id,
-				name: newUser.name,
-				email: newUser.email,
-				username: newUser.username,
-				bio: newUser.bio,
-				profilePic: newUser.profilePic,
-			});
-		} else {
-			res.status(400).json({ error: "Invalid user data" });
-		}
-	} catch (err) {
-		res.status(500).json({ error: err.message });
-		console.log("Error in signupUser: ", err.message);
-	}
-};
 
 const loginUser = async (req, res) => {
-	try {
-		const { username, password } = req.body;
-		const user = await User.findOne({ username });
-		const isPasswordCorrect = await bcrypt.compare(password, user?.password || "");
+    try {
+        const { username, password } = req.body;
+        const user = await User.findOne({ username });
 
-		if (!user || !isPasswordCorrect) return res.status(400).json({ error: "Invalid username or password" });
+        // Check if user exists and if the password is correct
+        const isPasswordCorrect = await bcrypt.compare(password, user?.password || "");
 
-		if (user.isFrozen) {
-			user.isFrozen = false;
-			await user.save();
-		}
+        if (!user || !isPasswordCorrect) {
+            return res.status(400).json({ error: "Invalid username or password" });
+        }
 
-		generateTokenAndSetCookie(user._id, res);
+        // Check if user is verified
+        if (!user.isVerified) {
+            // Generate a new verification token
+            const verificationToken = crypto.randomBytes(32).toString('hex');
+            user.verificationToken = verificationToken;
 
-		res.status(200).json({
-			_id: user._id,
-			name: user.name,
-			email: user.email,
-			username: user.username,
-			bio: user.bio,
-			profilePic: user.profilePic,
-		});
-	} catch (error) {
-		res.status(500).json({ error: error.message });
-		console.log("Error in loginUser: ", error.message);
-	}
+            // Save the updated user with the new verification token
+            await user.save();
+
+            // Send a new verification email
+            const verificationLink = `${req.protocol}://${req.get('host')}/verify-email/${verificationToken}/${user.email}`;
+            await sendVerificationEmail(user.email, verificationLink);
+
+            return res.status(403).json({
+                error: "User account is not verified. A verification email has been sent. Please check your email and verify your account."
+            });
+        }
+
+        // Unfreeze the account if it was frozen
+        if (user.isFrozen) {
+            user.isFrozen = false;
+            await user.save();
+        }
+
+        // Generate token and set cookie
+        generateTokenAndSetCookie(user._id, res);
+
+        // Send user data in the response
+        res.status(200).json({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            username: user.username,
+            bio: user.bio,
+            profilePic: user.profilePic,
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+        console.log("Error in loginUser: ", error.message);
+    }
 };
+
+
 
 const logoutUser = (req, res) => {
 	try {
@@ -281,7 +408,79 @@ const freezeAccount = async (req, res) => {
 		res.status(500).json({ error: error.message });
 	}
 };
-
+ const requestPasswordReset = async (req, res) => {
+	const { email } = req.body;
+  
+	try {
+	  const user = await User.findOne({ email });
+	  if (!user) {
+		return res.status(404).json({ message: 'User with this email does not exist' });
+	  }
+  
+	  // Generate reset token
+	  const resetToken = crypto.randomBytes(32).toString('hex');
+	  user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+	  user.resetPasswordExpires = Date.now() + 10 * 60 * 1000; // Token expires in 10 minutes
+	  await user.save();
+  
+	  // Reset URL (e.g., `http://localhost:3000/password-reset/:token`)
+	  const resetURL = `${req.protocol}://${req.get('host')}/password-reset/${resetToken}`;
+  
+	  // Send the reset email
+	  await sendPasswordResetEmail(user.email, resetURL);
+  
+	  res.status(200).json({ message: 'Password reset email sent successfully' });
+	} catch (error) {
+	  res.status(500).json({ message: 'An error occurred, please try again' });
+	}
+  };
+  
+ const resetPassword = async (req, res) => {
+	const { token } = req.params;
+	const { newPassword } = req.body;
+  
+	try {
+	  // Hash the token and find the user
+	  const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+	  const user = await User.findOne({
+		resetPasswordToken: hashedToken,
+		resetPasswordExpires: { $gt: Date.now() },
+	  });
+  
+	  if (!user) {
+		return res.status(400).json({ message: 'Token is invalid or has expired' });
+	  }
+  
+	  // Update password
+	  const salt = await bcrypt.genSalt(10);
+	  user.password = await bcrypt.hash(newPassword, salt);
+	  user.resetPasswordToken = undefined;
+	  user.resetPasswordExpires = undefined;
+	  await user.save();
+  
+	  res.status(200).json({ message: 'Password has been reset' });
+	} catch (error) {
+	  res.status(500).json({ message: 'An error occurred, please try again' });
+	}
+  };
+   const sendPasswordResetEmail = async (email, resetURL) => {
+	const transporter = nodemailer.createTransport({
+	  service: 'gmail',
+	  auth: {
+		user: process.env.EMAIL_USER,
+		pass: process.env.EMAIL_PASSWORD,
+	  },
+	});
+  
+	const mailOptions = {
+	  from: process.env.EMAIL_USER,
+	  to: email,
+	  subject: 'Password Reset Request',
+	  html: `<p>You requested a password reset.</p><p>Click <a href="${resetURL}">here</a> to reset your password.</p>`,
+	};
+  
+	await transporter.sendMail(mailOptions);
+  };
 export {
 	signupUser,
 	loginUser,
@@ -293,5 +492,6 @@ export {
 	freezeAccount,
 	getUsers,
 	getFollowers,
-	getFollowing
+	getFollowing,
+	verifyEmail,sendVerificationEmail,resetPassword ,requestPasswordReset 
 };

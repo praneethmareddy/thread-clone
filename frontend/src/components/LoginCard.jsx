@@ -11,14 +11,16 @@ import {
 	Heading,
 	Text,
 	useColorModeValue,
-	Link,
+	Link as ChakraLink, // Importing Link from Chakra UI and renaming it
 } from "@chakra-ui/react";
+
 import { useState } from "react";
 import { ViewIcon, ViewOffIcon } from "@chakra-ui/icons";
 import { useSetRecoilState } from "recoil";
 import authScreenAtom from "../atoms/authAtom";
 import useShowToast from "../hooks/useShowToast";
 import userAtom from "../atoms/userAtom";
+import { Link as RouterLink } from "react-router-dom"; // Importing Link from React Router
 
 export default function LoginCard() {
 	const [showPassword, setShowPassword] = useState(false);
@@ -31,6 +33,7 @@ export default function LoginCard() {
 		password: "",
 	});
 	const showToast = useShowToast();
+
 	const handleLogin = async () => {
 		setLoading(true);
 		try {
@@ -54,6 +57,7 @@ export default function LoginCard() {
 			setLoading(false);
 		}
 	};
+
 	return (
 		<Flex align={"center"} justify={"center"}>
 			<Stack spacing={8} mx={"auto"} maxW={"lg"} py={12} px={6}>
@@ -114,14 +118,20 @@ export default function LoginCard() {
 								Login
 							</Button>
 						</Stack>
-						<Stack pt={6}>
-							<Text align={"center"}>
-								Don&apos;t have an account?{" "}
-								<Link color={"blue.400"} onClick={() => setAuthScreen("signup")}>
-									Sign up
-								</Link>
-							</Text>
-						</Stack>
+						<Stack pt={6} spacing={2} align="center">
+	<Text>
+		Don&apos;t have an account?{" "}
+		<ChakraLink color={"blue.400"} onClick={() => setAuthScreen("signup")}>
+			Sign up
+		</ChakraLink>
+	</Text>
+	<Text>
+		<ChakraLink as={RouterLink} to="/forgot-password" color="blue.400">
+			Forgot Password?
+		</ChakraLink>
+	</Text>
+</Stack>
+
 					</Stack>
 				</Box>
 			</Stack>

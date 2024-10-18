@@ -36,11 +36,13 @@ const UserPage = () => {
 				setPosts([]);
 			} finally {
 				setFetchingPosts(false);
+			
 			}
+
 		};
 
 		getPosts();
-	}, [username, showToast, setPosts, user,replyOrThread]);
+	}, [username, showToast, setPosts, user, replyOrThread]);
 
 	if (!user && loading) {
 		return (

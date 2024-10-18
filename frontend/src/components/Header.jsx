@@ -10,7 +10,7 @@ import authScreenAtom from "../atoms/authAtom";
 import { BsFillChatQuoteFill } from "react-icons/bs";
 import { MdOutlineSettings } from "react-icons/md";
 
-import SearchBar from "./searchbar";
+import SearchBar from "./SearchBar";
 
 const Header = () => {
 	const { colorMode, toggleColorMode } = useColorMode();

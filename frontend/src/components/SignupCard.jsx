@@ -24,17 +24,19 @@ import userAtom from "../atoms/userAtom";
 export default function SignupCard() {
 	const [showPassword, setShowPassword] = useState(false);
 	const setAuthScreen = useSetRecoilState(authScreenAtom);
+	const setUser = useSetRecoilState(userAtom);
 	const [inputs, setInputs] = useState({
 		name: "",
 		username: "",
 		email: "",
 		password: "",
 	});
+	const [isSubmitting, setIsSubmitting] = useState(false);
 
 	const showToast = useShowToast();
-	const setUser = useSetRecoilState(userAtom);
 
 	const handleSignup = async () => {
+		setIsSubmitting(true);
 		try {
 			const res = await fetch("/api/users/signup", {
 				method: "POST",
@@ -44,18 +46,36 @@ export default function SignupCard() {
 				body: JSON.stringify(inputs),
 			});
 			const data = await res.json();
-
+	
 			if (data.error) {
 				showToast("Error", data.error, "error");
+				setIsSubmitting(false);
 				return;
 			}
-
-			localStorage.setItem("user-threads", JSON.stringify(data));
-			setUser(data);
+	
+			// Show a message to check the user's email for verification
+			if (data.message.includes("Please check your email for verification")) {
+				showToast("Success", "Please check your email for verification.", "success");
+	
+				// Store user details and token (if provided) after email verification
+				if (data.user && data.token) {
+					setUser(data.user); // Set the user atom state
+					localStorage.setItem("token", data.token); // Optionally store the token in local storage
+					// Redirect to the home screen or dashboard
+					window.location.href = "/home"; // Update with your actual home route
+				}
+	
+				// Redirect to a "check-email" screen
+				setAuthScreen("check-email");
+			}
+	
+			setIsSubmitting(false);
 		} catch (error) {
-			showToast("Error", error, "error");
+			showToast("Error", error.message, "error");
+			setIsSubmitting(false);
 		}
 	};
+	
 
 	return (
 		<Flex align={"center"} justify={"center"}>
@@ -118,6 +138,7 @@ export default function SignupCard() {
 						<Stack spacing={10} pt={2}>
 							<Button
 								loadingText='Submitting'
+								isLoading={isSubmitting}
 								size='lg'
 								bg={useColorModeValue("gray.600", "gray.700")}
 								color={"white"}
