@@ -229,15 +229,17 @@ const getFeedPosts = async (req, res) => {
         // Combine feed posts and recommended posts
         const combinedPosts = [...feedPosts, ...recommendedPosts];
 
-        // Use a Set to ensure uniqueness of posts based on postId
-        const uniquePostIds = new Set();
-        const uniquePosts = combinedPosts.filter(post => {
-            if (post._id && !uniquePostIds.has(post._id)) {
-                uniquePostIds.add(post._id);
-                return true; // Include this post
+        // Use a Map to ensure uniqueness of posts based on postId
+        const postMap = new Map();
+
+        combinedPosts.forEach(post => {
+            if (post._id && !postMap.has(post._id)) {
+                postMap.set(post._id, post); // Add to map if not already present
             }
-            return false; // Exclude this post
         });
+
+        // Convert the map values back to an array
+        const uniquePosts = Array.from(postMap.values());
 
         // Sort the unique posts based on creation time (most recent first)
         uniquePosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
