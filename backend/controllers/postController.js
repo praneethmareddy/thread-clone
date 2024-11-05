@@ -184,7 +184,6 @@ const replyToPost = async (req, res) => {
 	}
 };
 
-
 const getFeedPosts = async (req, res) => {
     try {
         const userId = req.user._id; // Get the current user's ID
@@ -203,7 +202,7 @@ const getFeedPosts = async (req, res) => {
             .limit(20) // Limit the number of feed posts for efficiency
             .select('_id postedBy text img createdAt likes replies'); // Project only necessary fields
 
-        // Fetch recommended posts using the external API
+        // Fetch recommended post IDs from the external API
         const recommendationPromise = fetch('https://ml-api-dwdv.onrender.com/recommend_posts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -219,16 +218,13 @@ const getFeedPosts = async (req, res) => {
         // Wait for both promises to resolve
         const [feedPosts, recommendationData] = await Promise.all([feedPostsPromise, recommendationPromise]);
 
-        // Format recommended posts to match the feed post structure
-        const recommendedPosts = (Array.isArray(recommendationData.recommendations) ? recommendationData.recommendations : []).map(rec => ({
-            _id: rec.postId || null,            
-            postedBy: rec.userId || null,       
-            text: rec.text || '',               
-            img: null,                          
-            createdAt: new Date(),              
-            likes: [],                          
-            replies: []                         
-        })).filter(post => post._id && post.postedBy); // Filter out any posts with null _id or postedBy
+        // Get the recommended post IDs (assuming the API returns an array of recommendations with 'postId')
+        const recommendedPostIds = recommendationData.recommendations.map(rec => rec.postId);
+
+        // Fetch recommended posts from the database using the post IDs
+        const recommendedPosts = await Post.find({ _id: { $in: recommendedPostIds } })
+            .select('_id postedBy text img createdAt likes replies') // Fetch the same fields as feed posts
+            .sort({ createdAt: -1 }); // Sort by creation date if necessary
 
         // Combine feed posts and recommended posts
         const combinedPosts = [...feedPosts, ...recommendedPosts];
