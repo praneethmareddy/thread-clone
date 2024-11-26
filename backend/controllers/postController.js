@@ -229,23 +229,22 @@ const getFeedPosts = async (req, res) => {
         // Combine feed posts and recommended posts
         const combinedPosts = [...feedPosts, ...recommendedPosts];
 
-        // Use a Map to ensure uniqueness of posts based on postId
-        const postMap = new Map();
+        const seenPostIds = new Set(); // This will track unique post IDs
+const uniquePosts = [];
 
-        combinedPosts.forEach(post => {
-            if (post._id && !postMap.has(post._id)) {
-                postMap.set(post._id, post); // Add to map if not already present
-            }
-        });
+combinedPosts.forEach(post => {
+    if (post._id && !seenPostIds.has(post._id)) {
+        seenPostIds.add(post._id);  // Mark this post ID as seen
+        uniquePosts.push(post);     // Add the post to the uniquePosts array
+    }
+});
 
-        // Convert the map values back to an array
-        const uniquePosts = Array.from(postMap.values());
+// Sort the unique posts based on creation time (most recent first)
+uniquePosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-        // Sort the unique posts based on creation time (most recent first)
-        uniquePosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+// Send combined posts as the response
+res.status(200).json(uniquePosts);
 
-        // Send combined posts as the response
-        res.status(200).json(uniquePosts);
     } catch (err) {
         res.status(500).json({ error: 'Internal Server Error', message: err.message });
         console.error(err);
