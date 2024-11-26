@@ -187,27 +187,65 @@ const replyToPost = async (req, res) => {
 const getFeedPosts = async (req, res) => {
     try {
         const userId = req.user._id; // Get the current user's ID
+        const user = await User.findById(userId).select('following'); // Only select the following field
 
-        // Forward the request to the ML API
-        const response = await fetch('https://ml-api-dwdv.onrender.com/recommend_posts', {
+        // Check if the user exists
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const following = user.following; // Get the list of users the current user is following
+
+        // Fetch feed posts from the users the current user is following
+        const feedPostsPromise = Post.find({ postedBy: { $in: following } })
+            .sort({ createdAt: -1 })
+            .limit(20) // Limit the number of feed posts for efficiency
+            .select('_id postedBy text img createdAt likes replies'); // Project only necessary fields
+
+        // Fetch recommended post IDs from the external API
+        const recommendationPromise = fetch('https://ml-api-dwdv.onrender.com/recommend_posts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 user_id: userId.toString(),
-                top_n: 20 // Specify the limit for combined posts
+                top_n: 5
             })
+        }).then(response => {
+            if (!response.ok) throw new Error('Failed to fetch recommended posts');
+            return response.json();
         });
 
-        // Handle response errors from the ML API
-        if (!response.ok) {
-            throw new Error('Failed to fetch posts from the recommendation API');
-        }
+        // Wait for both promises to resolve
+        const [feedPosts, recommendationData] = await Promise.all([feedPostsPromise, recommendationPromise]);
 
-        // Parse the response
-        const data = await response.json();
+        // Get the recommended post IDs (assuming the API returns an array of recommendations with 'postId')
+        const recommendedPostIds = recommendationData.recommendations.map(rec => rec.postId);
 
-        // Send the combined posts directly as the response
-        res.status(200).json(data.recommendations || []); // Return an empty array if recommendations are missing
+        // Fetch recommended posts from the database using the post IDs
+        const recommendedPosts = await Post.find({ _id: { $in: recommendedPostIds } })
+            .select('_id postedBy text img createdAt likes replies') // Fetch the same fields as feed posts
+            .sort({ createdAt: -1 }); // Sort by creation date if necessary
+
+        // Combine feed posts and recommended posts
+        const combinedPosts = [...feedPosts, ...recommendedPosts];
+
+        // Use a Map to ensure uniqueness of posts based on postId
+        const postMap = new Map();
+
+        combinedPosts.forEach(post => {
+            if (post._id && !postMap.has(post._id)) {
+                postMap.set(post._id, post); // Add to map if not already present
+            }
+        });
+
+        // Convert the map values back to an array
+        const uniquePosts = Array.from(postMap.values());
+
+        // Sort the unique posts based on creation time (most recent first)
+        uniquePosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        // Send combined posts as the response
+        res.status(200).json(uniquePosts);
     } catch (err) {
         res.status(500).json({ error: 'Internal Server Error', message: err.message });
         console.error(err);
