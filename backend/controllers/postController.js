@@ -189,62 +189,59 @@ const getFeedPosts = async (req, res) => {
         const userId = req.user._id; // Get the current user's ID
         const user = await User.findById(userId).select('following'); // Only select the following field
 
-        // Check if the user exists
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
 
-        const following = user.following; // Get the list of users the current user is following
+        const following = user.following; // List of users the current user is following
 
-        // Fetch feed posts from the users the current user is following
+        // Fetch feed posts
         const feedPostsPromise = Post.find({ postedBy: { $in: following } })
             .sort({ createdAt: -1 })
             .limit(20) // Limit the number of feed posts for efficiency
             .select('_id postedBy text img createdAt likes replies'); // Project only necessary fields
 
-        // Fetch recommended post IDs from the external API
+        // Fetch recommended posts from the external API
         const recommendationPromise = fetch('https://ml-api-dwdv.onrender.com/recommend_posts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                user_id: userId.toString(),
-                top_n: 5
-            })
-        }).then(response => {
-            if (!response.ok) throw new Error('Failed to fetch recommended posts');
+            body: JSON.stringify({ user_id: userId.toString(), top_n: 5 })
+        }).then(async response => {
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`ML API error: ${errorText}`);
+            }
             return response.json();
         });
 
-        // Wait for both promises to resolve
         const [feedPosts, recommendationData] = await Promise.all([feedPostsPromise, recommendationPromise]);
 
-        // Get the recommended post IDs (assuming the API returns an array of recommendations with 'postId')
+        // Get the recommended post IDs
         const recommendedPostIds = recommendationData.recommendations.map(rec => rec.postId);
 
-        // Fetch recommended posts from the database using the post IDs
+        // Fetch recommended posts from the database
         const recommendedPosts = await Post.find({ _id: { $in: recommendedPostIds } })
-            .select('_id postedBy text img createdAt likes replies') // Fetch the same fields as feed posts
-            .sort({ createdAt: -1 }); // Sort by creation date if necessary
+            .select('_id postedBy text img createdAt likes replies')
+            .sort({ createdAt: -1 });
 
-        // Combine feed posts and recommended posts
+        // Combine and deduplicate
         const combinedPosts = [...feedPosts, ...recommendedPosts];
 
-        const seenPostIds = new Set(); // This will track unique post IDs
-const uniquePosts = [];
+        const seenPostIds = new Set();
+        const uniquePosts = [];
 
-combinedPosts.forEach(post => {
-    if (post._id && !seenPostIds.has(post._id)) {
-        seenPostIds.add(post._id);  // Mark this post ID as seen
-        uniquePosts.push(post);     // Add the post to the uniquePosts array
-    }
-});
+        combinedPosts.forEach(post => {
+            const postIdStr = post._id.toString(); // Convert `_id` to string for consistent comparison
+            if (!seenPostIds.has(postIdStr)) { // Changed: Ensure duplicate checking is consistent using string comparison
+                seenPostIds.add(postIdStr); // Mark as seen
+                uniquePosts.push(post);    // Add to uniquePosts array
+            }
+        });
 
-// Sort the unique posts based on creation time (most recent first)
-uniquePosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        // Sort by creation time (most recent first)
+        uniquePosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-// Send combined posts as the response
-res.status(200).json(uniquePosts);
-
+        res.status(200).json(uniquePosts);
     } catch (err) {
         res.status(500).json({ error: 'Internal Server Error', message: err.message });
         console.error(err);
