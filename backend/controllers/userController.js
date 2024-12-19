@@ -8,7 +8,6 @@ import crypto from 'crypto'; // To generate a random token
 
 import nodemailer from 'nodemailer'; // For sending emails
 
-
 const signupUser = async (req, res) => {
 	try {
 		const { name, email, username, password } = req.body;
@@ -18,6 +17,7 @@ const signupUser = async (req, res) => {
 			return res.status(400).json({ error: "Invalid email format" });
 		}
 
+		console.log("Checking if user exists...");
 		const user = await User.findOne({ $or: [{ email }, { username }] });
 
 		if (user && user.isVerified) {
@@ -27,7 +27,6 @@ const signupUser = async (req, res) => {
 		const salt = await bcrypt.genSalt(10);
 		const hashedPassword = await bcrypt.hash(password, salt);
 
-		// Create a verification token
 		const verificationToken = crypto.randomBytes(32).toString('hex');
 
 		const newUser = new User({
@@ -36,15 +35,25 @@ const signupUser = async (req, res) => {
 			username,
 			password: hashedPassword,
 			verificationToken,
-			isVerified: false // Set isVerified to false initially
+			isVerified: false
 		});
-		await newUser.save();
+
+		try {
+			await newUser.save();
+		} catch (saveErr) {
+			console.error("Error saving user:", saveErr);
+			return res.status(500).json({ error: "Error saving user to database", message: saveErr.message });
+		}
 
 		if (newUser) {
-			// Send verification email
 			const verificationLink = `${req.protocol}://${req.get('host')}/verify-email/${verificationToken}/${email}`;
 
-			await sendVerificationEmail(email, verificationLink);
+			try {
+				await sendVerificationEmail(email, verificationLink);
+			} catch (emailErr) {
+				console.error("Error sending email:", emailErr);
+				return res.status(500).json({ error: "Error sending verification email", message: emailErr.message });
+			}
 
 			res.status(201).json({
 				message: "Signup successful! Please check your email for verification.",
@@ -60,8 +69,8 @@ const signupUser = async (req, res) => {
 			res.status(400).json({ error: "Invalid user data" });
 		}
 	} catch (err) {
+		console.error("Error in signupUser:", err.message);
 		res.status(500).json({ error: err.message });
-		console.log("Error in signupUser: ", err.message);
 	}
 };
 
