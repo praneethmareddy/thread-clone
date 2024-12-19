@@ -205,7 +205,7 @@ const getFeedPosts = async (req, res) => {
         const recommendationPromise = fetch('https://ml-api-dwdv.onrender.com/recommend_posts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId.toString(), top_n: 5 })
+            body: JSON.stringify({ user_id: userId.toString(), top_n: 2 })
         }).then(async response => {
             if (!response.ok) {
                 const errorText = await response.text();
